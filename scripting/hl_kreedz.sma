@@ -95,10 +95,66 @@
 
 #define TE_EXPLOSION 				3
 
+enum _:REPLAY
+{
+  //RP_VERSION,
+	Float:RP_TIME,
+	Float:RP_ORIGIN[3],
+	Float:RP_ANGLES[3],
+	RP_BUTTONS
+}
+
+enum _:CP_TYPES
+{
+	CP_TYPE_SPEC,
+	CP_TYPE_CURRENT,
+	CP_TYPE_OLD,
+	CP_TYPE_PRACTICE, // Practice checkpoints (with speed / midair)
+	CP_TYPE_PRACTICE_OLD,
+	CP_TYPE_CUSTOM_START, // kz_set_custom_start position.
+	CP_TYPE_START,        // Start button.
+	CP_TYPE_DEFAULT_START // Standard spawn
+}
+
+enum _:CP_DATA
+{
+	bool:CP_VALID,			// is checkpoint valid
+	CP_FLAGS,				// pev flags
+	Float:CP_ORIGIN[3],		// position
+	Float:CP_ANGLES[3],		// view angles
+	Float:CP_VIEWOFS[3],	// view offset
+	Float:CP_VELOCITY[3],	// velocity
+	Float:CP_HEALTH,		// health
+	Float:CP_ARMOR,			// armor
+	bool:CP_LONGJUMP,		// longjump
+}
+
+enum _:COUNTERS
+{
+	COUNTER_CP,
+	COUNTER_TP,
+	COUNTER_SP,
+	COUNTER_PRACTICE_CP,
+	COUNTER_PRACTICE_TP
+}
+
+enum BUTTON_TYPE
+{
+	BUTTON_START,
+	BUTTON_FINISH,
+	BUTTON_NOT,
+}
+
+enum _:WEAPON
+{
+	WEAPON_CLASSNAME[32],
+	Float:WEAPON_ORIGIN[3]
+}
+
 new const PLUGIN[] = "HL KreedZ Beta";
 new const PLUGIN_TAG[] = "HLKZ";
-new const VERSION[] = "0.37";
-new const BUILD = 36; // Should not be decreased. This is for replays, to know which version they're in, in case the stored binary data (or format) changes
+new const VERSION[] = "0.38";
+new const DEMO_VERSION = 36; // Should not be decreased. This is for replays, to know which version they're in, in case the stored binary data (or format) changes
 new const AUTHOR[] = "KORD_12.7 & Lev & YaLTeR & naz";
 
 new const MAIN_MENU_ID[] = "HL KreedZ Menu";
@@ -112,6 +168,8 @@ new const PLUGIN_CFG_SHORTENED[] = "hlkz";
 new const MYSQL_LOG_FILENAME[] = "kz_mysql.log";
 new const MAP_POOL_FILE[] = "map_pool.ini";
 new const CUP_FILE[] = "cup.ini";
+
+new const FIREWORK_SOUND[] = "firework.wav";
 
 //new const staleStatTime = 30 * 24 * 60 * 60;	// Keep old stat for this amount of time
 //new const keepStatPlayers = 100;				// Keep this amount of players in stat even if stale
@@ -204,58 +262,6 @@ new const g_DamageBoostEntities[][] = {
 	"rpg_rocket"			// DMG_BLAST
 };
 
-enum _:REPLAY
-{
-  //RP_VERSION,
-	Float:RP_TIME,
-	Float:RP_ORIGIN[3],
-	Float:RP_ANGLES[3],
-	RP_BUTTONS
-}
-
-enum _:CP_TYPES
-{
-	CP_TYPE_SPEC,
-	CP_TYPE_CURRENT,
-	CP_TYPE_OLD,
-	CP_TYPE_CUSTOM_START, // kz_set_custom_start position.
-	CP_TYPE_START,        // Start button.
-	CP_TYPE_DEFAULT_START // Standard spawn
-}
-
-enum _:CP_DATA
-{
-	bool:CP_VALID,			// is checkpoint valid
-	CP_FLAGS,				// pev flags
-	Float:CP_ORIGIN[3],		// position
-	Float:CP_ANGLES[3],		// view angles
-	Float:CP_VIEWOFS[3],	// view offset
-	Float:CP_VELOCITY[3],	// velocity
-	Float:CP_HEALTH,		// health
-	Float:CP_ARMOR,			// armor
-	bool:CP_LONGJUMP,		// longjump
-}
-
-enum _:COUNTERS
-{
-	COUNTER_CP,
-	COUNTER_TP,
-	COUNTER_SP,
-}
-
-enum BUTTON_TYPE
-{
-	BUTTON_START,
-	BUTTON_FINISH,
-	BUTTON_NOT,
-}
-
-enum _:WEAPON
-{
-	WEAPON_CLASSNAME[32],
-	Float:WEAPON_ORIGIN[3]
-}
-
 new g_bit_is_connected, g_bit_is_alive, g_bit_invis, g_bit_waterinvis;
 new g_bit_is_hltv, g_bit_is_bot;
 new g_baIsClimbing, g_baIsPaused, g_baIsFirstSpawn, g_baIsPureRunning;
@@ -340,7 +346,7 @@ new g_PauseSprite;
 new g_TaskEnt;
 
 new g_Firework;
-new Float:prevButtonOrigin[3];
+new Float:g_PrevButtonOrigin[3];
 
 new g_MapId;
 new g_Map[64];
@@ -443,8 +449,6 @@ new pcvar_sv_ag_match_running;
 new mfwd_hlkz_cheating;
 new mfwd_hlkz_worldrecord;
 
-new const g_strSoundFirework[ ] = "firework.wav";
-
 public plugin_precache()
 {
 	g_FwLightStyle = register_forward(FM_LightStyle, "Fw_FmLightStyle");
@@ -453,7 +457,7 @@ public plugin_precache()
 	precache_model("models/player/gordon/gordon.mdl");
 	precache_model("models/p_shotgun.mdl");
 	g_Firework = precache_model("sprites/firework.spr");
-	precache_sound(g_strSoundFirework);
+	precache_sound(FIREWORK_SOUND);
 	//precache_model("models/boxy.mdl");
 }
 
@@ -632,7 +636,7 @@ public plugin_init()
 	register_touch("trigger_multiple", 	"player", "Fw_FmPlayerTouchHealthBooster");
 
 	mfwd_hlkz_cheating = CreateMultiForward("hlkz_cheating", ET_IGNORE, FP_CELL);
-	mfwd_hlkz_worldrecord = CreateMultiForward("hlkz_worldrecord", ET_IGNORE, FP_CELL, FP_FLOAT, FP_CELL, FP_CELL);
+	mfwd_hlkz_worldrecord = CreateMultiForward("hlkz_worldrecord", ET_IGNORE, FP_CELL, FP_CELL);
 
 	register_message(get_user_msgid("Health"), "Fw_MsgHealth");
 	register_message(SVC_TEMPENTITY, "Fw_MsgTempEntity");
@@ -706,9 +710,9 @@ public plugin_cfg()
 	GetTopTypeString(PURE, g_TopType[PURE]);
 
 	// Load stats
-	formatex(g_StatsFile[NOOB], charsmax(g_StatsFile[]), "%s/%s_%s.dat", g_ConfigsDir, g_Map, g_TopType[PURE]);
+	formatex(g_StatsFile[NOOB], charsmax(g_StatsFile[]), "%s/%s_%s.dat", g_ConfigsDir, g_Map, g_TopType[NOOB]);
 	formatex(g_StatsFile[PRO],  charsmax(g_StatsFile[]),  "%s/%s_%s.dat", g_ConfigsDir, g_Map, g_TopType[PRO]);
-	formatex(g_StatsFile[PURE], charsmax(g_StatsFile[]), "%s/%s_%s.dat", g_ConfigsDir, g_Map, g_TopType[NOOB]);
+	formatex(g_StatsFile[PURE], charsmax(g_StatsFile[]), "%s/%s_%s.dat", g_ConfigsDir, g_Map, g_TopType[PURE]);
 
 	// Load map settings
 	formatex(g_MapIniFile, charsmax(g_MapIniFile), "%s/%s.ini", g_ConfigsDir, g_Map);
@@ -963,17 +967,18 @@ DisplayKzMenu(id, mode)
 	{
 	case 0:
 		{
-			keys |= MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_3 | MENU_KEY_4 | MENU_KEY_5 | MENU_KEY_6; // | MENU_KEY_7 | MENU_KEY_8;
+			keys |= MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_3 | MENU_KEY_4 | MENU_KEY_5 | MENU_KEY_6 | MENU_KEY_7; // | MENU_KEY_8;
 
 			len = formatex(menuBody[len], charsmax(menuBody) - len, "%s\n\n", PLUGIN);
 			len += formatex(menuBody[len], charsmax(menuBody) - len, "1. START CLIMB\n");
-			len += formatex(menuBody[len], charsmax(menuBody) - len, "2. Checkpoints\n\n");
-			len += formatex(menuBody[len], charsmax(menuBody) - len, "3. HUD settings\n");
-			len += formatex(menuBody[len], charsmax(menuBody) - len, "4. Spectate players\n");
-			len += formatex(menuBody[len], charsmax(menuBody) - len, "5. Top climbers\n\n");
-			len += formatex(menuBody[len], charsmax(menuBody) - len, "6. Help\n\n");
-			//len += formatex(menuBody[len], charsmax(menuBody) - len, "7. About\n\n");
-			//len += formatex(menuBody[len], charsmax(menuBody) - len, "8. Admin area\n\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "2. Checkpoints\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "3. Practice checkpoints\n\n");	
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "4. HUD settings\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "5. Top climbers\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "6. Spectate players\n\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "7. Help\n\n");
+			//len += formatex(menuBody[len], charsmax(menuBody) - len, "8. About\n\n");
+			//len += formatex(menuBody[len], charsmax(menuBody) - len, "9. Admin area\n\n");
 		}
 	case 1:
 		{
@@ -1011,6 +1016,15 @@ DisplayKzMenu(id, mode)
 				len += formatex(menuBody[len], charsmax(menuBody) - len, "#. Unstuck (%d/2 CPs)\n", g_CpCounters[id][COUNTER_CP]);
 		}
 	case 3:
+		{
+			keys |= MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_3;
+
+			len = formatex(menuBody[len], charsmax(menuBody) - len, "Practice CPs: %d | TPs: %d\n\n", g_CpCounters[id][COUNTER_PRACTICE_CP],g_CpCounters[id][COUNTER_PRACTICE_TP]);
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "1. Checkpoint\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "2. Teleport\n");
+			len += formatex(menuBody[len], charsmax(menuBody) - len, "3. Previous\n");
+		}		
+	case 4:
 		{
 			keys |= MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_3 | MENU_KEY_4;
 
@@ -1351,9 +1365,10 @@ public ActionKzMenu(id, key)
 		case 1: return DisplayKzMenu(id, 1);
 		case 2: return DisplayKzMenu(id, 2);
 		case 3: return DisplayKzMenu(id, 3);
-		case 4: CmdSpec(id);
+		case 4: return DisplayKzMenu(id, 4);
 		case 5: return DisplayKzMenu(id, 5);
-		case 6: CmdHelp(id);
+		case 6: CmdSpec(id);
+		case 7: CmdHelp(id);
 		}
 	case 1:
 		switch (key)
@@ -1373,6 +1388,13 @@ public ActionKzMenu(id, key)
 		case 3: CmdStuck(id);
 		}
 	case 3:
+		switch (key)
+		{
+			case 1: CmdPracticeCp(id);
+			case 2: CmdPracticeTp(id);
+			case 3: CmdPracticePrev(id);
+		}
+	case 4:
 		switch (key)
 		{
 		case 1: CmdTimer(id);
@@ -1492,9 +1514,9 @@ ResetPlayer(id, bool:onDisconnect, bool:onlyTimer)
 	if (!onDisconnect)
 	{
 		if (onlyTimer)
-			ShowMessage(id, "Timer resetted");
+			ShowMessage(id, "Timer reset");
 		else
-			ShowMessage(id, "Timer and checkpoints resetted");
+			ShowMessage(id, "Timer and checkpoints reset");
 	}
 }
 
@@ -1584,10 +1606,30 @@ CmdTp(id)
 		Teleport(id, CP_TYPE_CURRENT);
 }
 
+CmdPracticeCp(id)
+{
+	if (CanCreateCp(id, true, true))
+		CreateCp(id, CP_TYPE_PRACTICE)
+}
+
+CmdPracticeTp(id)
+{
+	ResetPlayer(id, false, true);
+	if (CanTeleport(id, CP_TYPE_PRACTICE))
+		Teleport(id, CP_TYPE_PRACTICE);
+}
+
 CmdStuck(id)
 {
 	if (CanTeleport(id, CP_TYPE_OLD))
 		Teleport(id, CP_TYPE_OLD);
+}
+
+CmdPracticePrev(id)
+{
+	ResetPlayer(id, false, true)
+	if(CanTeleport(id, CP_TYPE_PRACTICE_OLD))
+		Teleport(id, CP_TYPE_PRACTICE_OLD);
 }
 
 CmdStart(id)
@@ -1786,7 +1828,6 @@ CmdReplay(id, RUN_TYPE:runType)
 		ArrayClear(g_ReplayFrames[id]);
 		//console_print(id, "gonna read the replay file");
 
-		//new buildNumber;
 		//fread(file, version, BLOCK_SHORT);
 		//console_print(1, "replaying demo of version %d", version);
 
@@ -2302,6 +2343,8 @@ CmdHelp(id)
 		/kz - show main menu\n\
 		/cp - create control point\n\
 		/tp - teleport to last control point\n\
+		/practicecp - create practice control point\n\
+		/practicetp - teleport to last practice control point\n\
 		/top - show Top climbers\n\
 		/pure /pro /nub <#>-<#> - show specific tops and records, e.g. /pro 20-50\n\
 		/unstuck - teleport to previous control point\n\
@@ -2314,7 +2357,8 @@ CmdHelp(id)
 		len += formatex(motd[len], charsmax(motd) - len,
 			"/lj - show LJ top\n\
 			/ljstats - toggle showing different jump distances\n\
-			/prestrafe - toggle showing prestrafe speed\n");
+			/prestrafe - toggle showing prestrafe speed\n\
+			/ljsounds - toggle announcer sounds\n");
 	}
 	if (is_plugin_loaded("Enhanced Map Searching"))
 	{
@@ -2366,6 +2410,15 @@ public CmdSayHandler(id, level, cid)
 
 	else if (equali(args[1], "stuck") || equali(args[1], "unstuck"))
 		CmdStuck(id);
+
+	else if (equali(args[1], "practicecp"))
+		CmdPracticeCp(id);
+
+	else if (equali(args[1], "practicetp"))
+		CmdPracticeTp(id);
+
+	else if (equali(args[1], "practiceprev"))
+		CmdPracticePrev(id);
 
 	else if (equali(args[1], "pause"))
 		CmdPause(id);
@@ -2434,7 +2487,7 @@ public CmdSayHandler(id, level, cid)
 	else if (containi(args[1], "printframes") == 0)
 		CmdPrintNextFrames(id);
 
-	else if (containi(args[1], "replaypure") == 0 || containi(args[1], "replaybot") == 0)
+	else if (containi(args[1], "replaypure") == 0 || containi(args[1], "replaybot") == 0 || containi(args[1], "rp") == 0)
 		CmdReplayPure(id);
 
 	else if (containi(args[1], "replaypro") == 0)
@@ -2557,7 +2610,7 @@ public TASCmdHandler(id)
 //*                                                     *
 //*******************************************************
 
-bool:CanCreateCp(id, bool:showMessages = true)
+bool:CanCreateCp(id, bool:showMessages = true, bool:practiceMode = false)
 {
 	if (!get_pcvar_num(pcvar_kz_checkpoints))
 	{
@@ -2576,10 +2629,13 @@ bool:CanCreateCp(id, bool:showMessages = true)
 		return false;
 	}
 
-	if (!IsValidPlaceForCp(id))
+	if (!practiceMode)
 	{
-		if (showMessages) ShowMessage(id, "You must be on the ground");
-		return false;
+		if (!IsValidPlaceForCp(id))
+		{
+			if (showMessages) ShowMessage(id, "You must be on the ground");
+			return false;
+		}
 	}
 
 	return true;
@@ -2590,7 +2646,7 @@ bool:CanTeleport(id, cp, bool:showMessages = true)
 	if (cp >= CP_TYPES)
 		return false;
 
-	if (cp != CP_TYPE_START && cp != CP_TYPE_CUSTOM_START && !get_pcvar_num(pcvar_kz_checkpoints))
+	if (cp != CP_TYPE_START && cp != CP_TYPE_CUSTOM_START && cp != CP_TYPE_PRACTICE && !get_pcvar_num(pcvar_kz_checkpoints))
 	{
 		if (showMessages) ShowMessage(id, "Checkpoint commands are disabled");
 		return false;
@@ -2600,7 +2656,11 @@ bool:CanTeleport(id, cp, bool:showMessages = true)
 		if (showMessages) ShowMessage(id, "Stuck/Unstuck commands are disabled");
 		return false;
 	}
-
+	if (cp == CP_TYPE_PRACTICE_OLD && !get_pcvar_num(pcvar_kz_stuck))
+	{
+		if (showMessages) ShowMessage(id, "Teleporting to previous checkpoints is disabled")
+		return false; 
+	}
 	if (!IsAlive(id) || pev(id, pev_iuser1))
 	{
 		if (showMessages) ShowMessage(id, "You must be alive to use this command");
@@ -2622,6 +2682,8 @@ bool:CanTeleport(id, cp, bool:showMessages = true)
 			case CP_TYPE_CUSTOM_START: ShowMessage(id, "You don't have a custom start point set");
 			case CP_TYPE_START: ShowMessage(id, "You don't have start checkpoint created");
 			case CP_TYPE_DEFAULT_START: ShowMessage(id, "The map doesn't have a default start checkpoint set");
+			case CP_TYPE_PRACTICE: ShowMessage(id, "You don't have a practice checkpoint created");
+			case CP_TYPE_PRACTICE_OLD: ShowMessage(id, "You don't have a previous practice checkpoint created")
 			}
 		return false;
 	}
@@ -2650,6 +2712,14 @@ CreateCp(id, cp, bool:specModeStepTwo = false)
 
 			// Backup current checkpoint
 			g_ControlPoints[id][CP_TYPE_OLD] = g_ControlPoints[id][CP_TYPE_CURRENT];
+		}
+	case CP_TYPE_PRACTICE:
+		{
+			g_CpCounters[id][COUNTER_PRACTICE_CP]++;
+			ShowMessage(id, "Practice checkpoint #%d created", g_CpCounters[id][COUNTER_PRACTICE_CP]);
+
+			// Backup current checkpoint
+			g_ControlPoints[id][CP_TYPE_PRACTICE_OLD] = g_ControlPoints[id][CP_TYPE_PRACTICE];
 		}
 	}
 
@@ -2681,17 +2751,34 @@ Teleport(id, cp)
 		set_pev(id, pev_flags, pev(id, pev_flags) | FL_DUCKING);
 	else
 		set_pev(id, pev_flags, pev(id, pev_flags) & ~FL_DUCKING);
+	
+	if  (cp == CP_TYPE_PRACTICE || cp == CP_TYPE_PRACTICE_OLD)
+	{
+		set_pev(id, pev_origin, g_ControlPoints[id][cp][CP_ORIGIN]);
+		set_pev(id, pev_angles, g_ControlPoints[id][cp][CP_ANGLES]);
+		set_pev(id, pev_v_angle, g_ControlPoints[id][cp][CP_ANGLES]);
+		set_pev(id, pev_view_ofs, g_ControlPoints[id][cp][CP_VIEWOFS]);
+		set_pev(id, pev_velocity, g_ControlPoints[id][cp][CP_VELOCITY]);
+		set_pev(id, pev_fixangle, true);
+		set_pev(id, pev_health, g_ControlPoints[id][cp][CP_HEALTH]);
+		set_pev(id, pev_armorvalue, g_ControlPoints[id][cp][CP_ARMOR]);
+		hl_set_user_longjump(id, g_ControlPoints[id][cp][CP_LONGJUMP]);
 
-	set_pev(id, pev_origin, g_ControlPoints[id][cp][CP_ORIGIN]);
-	set_pev(id, pev_angles, g_ControlPoints[id][cp][CP_ANGLES]);
-	set_pev(id, pev_v_angle, g_ControlPoints[id][cp][CP_ANGLES]);
-	set_pev(id, pev_view_ofs, g_ControlPoints[id][cp][CP_VIEWOFS]);
-	set_pev(id, pev_velocity, /*g_ControlPoints[id][cp][CP_VELOCITY]*/ Float:{ 0.0, 0.0, 0.0 });
-	set_pev(id, pev_fixangle, true);
-	set_pev(id, pev_health, g_ControlPoints[id][cp][CP_HEALTH]);
-	set_pev(id, pev_armorvalue, g_ControlPoints[id][cp][CP_ARMOR]);
-	hl_set_user_longjump(id, g_ControlPoints[id][cp][CP_LONGJUMP]);
-
+		g_CpCounters[id][COUNTER_PRACTICE_TP]++;
+		ShowMessage(id, "Go practice checkpoint #%d", g_CpCounters[id][COUNTER_PRACTICE_TP]);
+	}
+	else 
+	{ 
+		set_pev(id, pev_origin, g_ControlPoints[id][cp][CP_ORIGIN]);
+		set_pev(id, pev_angles, g_ControlPoints[id][cp][CP_ANGLES]);
+		set_pev(id, pev_v_angle, g_ControlPoints[id][cp][CP_ANGLES]);
+		set_pev(id, pev_view_ofs, g_ControlPoints[id][cp][CP_VIEWOFS]);
+		set_pev(id, pev_velocity, /*g_ControlPoints[id][cp][CP_VELOCITY]*/ Float:{ 0.0, 0.0, 0.0 });
+		set_pev(id, pev_fixangle, true);
+		set_pev(id, pev_health, g_ControlPoints[id][cp][CP_HEALTH]);
+		set_pev(id, pev_armorvalue, g_ControlPoints[id][cp][CP_ARMOR]);
+		hl_set_user_longjump(id, g_ControlPoints[id][cp][CP_LONGJUMP]);
+	}
 	ExecuteHamB(Ham_AddPoints, id, -1, true);
 
 	// Inform
@@ -3104,17 +3191,7 @@ FinishTimer(id)
 		server_cmd("agabort");
 		server_exec();
 
-		message_begin(MSG_BROADCAST,SVC_TEMPENTITY); //create firework entity
-		write_byte(TE_EXPLOSION);
-		write_coord(floatround(prevButtonOrigin[0])     );	// start position
-		write_coord(floatround(prevButtonOrigin[1])     );
-		write_coord(floatround(prevButtonOrigin[2]) + 100);
-		write_short(g_Firework);	// sprite index
-		write_byte(20); // scale
-		write_byte(10);	// framerate
-		write_byte(6);
-		message_end();
-		emit_sound(id, CHAN_AUTO, g_strSoundFirework, VOL_NORM, ATTN_NONE, 0, PITCH_NORM);
+		LaunchRecordFireworks();
 		
 		if (IsCupMap() && (id == g_CupPlayer1 || id == g_CupPlayer2) && g_CupReady1 && g_CupReady2)
 		{
@@ -3254,7 +3331,20 @@ public Fw_HamUseButtonPre(ent, id)
 	switch (type)
 	{
 	case BUTTON_START: StartClimb(id);
-	case BUTTON_FINISH: FinishClimb(id);
+	case BUTTON_FINISH: {
+		new Float:origin[3];
+		fm_get_brush_entity_origin(ent, origin); // find origin of button for fireworks
+
+		// console_print(0, "origin[0]: %f", origin[0]);
+		// console_print(0, "origin[1]: %f", origin[1]);
+		// console_print(0, "origin[2]: %f", origin[2]);
+
+		g_PrevButtonOrigin[0] = origin[0];
+		g_PrevButtonOrigin[1] = origin[1];
+		g_PrevButtonOrigin[2] = origin[2];
+
+		FinishClimb(id);
+	}
 	case BUTTON_NOT: CheckEndReqs(ent, id);
 	}
 
@@ -3274,16 +3364,6 @@ BUTTON_TYPE:GetEntityButtonType(ent)
 		}
 		else if (IsStopEntityName(name))
 		{
-			new Float:origin[3];
-			fm_get_brush_entity_origin(ent, origin); // find origin of button for fireworks
-
-			// console_print(0, "origin[0]: %f", origin[0]);
-			// console_print(0, "origin[1]: %f", origin[1]);
-			// console_print(0, "origin[2]: %f", origin[2]);
-
-			prevButtonOrigin[0] = origin[0];
-			prevButtonOrigin[1] = origin[1];
-			prevButtonOrigin[2] = origin[2];
 			return BUTTON_FINISH;
 		}
 	}
@@ -3297,16 +3377,6 @@ BUTTON_TYPE:GetEntityButtonType(ent)
 		}
 		else if (IsStopEntityName(name))
 		{
-			new Float:origin[3];
-			fm_get_brush_entity_origin(ent, origin);  // find origin of button for fireworks
-
-			// console_print(0, "origin[0]: %f", origin[0]);
-			// console_print(0, "origin[1]: %f", origin[1]);
-			// console_print(0, "origin[2]: %f", origin[2]);
-
-			prevButtonOrigin[0] = origin[0];
-			prevButtonOrigin[1] = origin[1];
-			prevButtonOrigin[2] = origin[2];
 			return BUTTON_FINISH;
 		}
 	}
@@ -3388,7 +3458,6 @@ UpdateHud(Float:currentGameTime)
 	get_players(players, num);
 	for (i = 0; i < num; i++)
 	{
-		new specs = 0, specsTotal = 0;
 		id = players[i];
 		GetColorlessName(id, playerName, charsmax(playerName));
 		//if (IsBot(id) || IsHltv(id)) continue;
@@ -3427,7 +3496,7 @@ UpdateHud(Float:currentGameTime)
 		if (is_user_alive(id) && get_pcvar_num(pcvar_kz_speclist))
 		{
 			new bool:sendTo[33];
-			if (GetSpectatorList(id, specHud, sendTo))
+			if (GetSpectatorList(id, specHud, charsmax(specHud), sendTo))
 			{
 				for (new i = 1; i <= g_MaxPlayers; i++)
 				{
@@ -3515,7 +3584,7 @@ UpdateHud(Float:currentGameTime)
 	}
 }
 
-GetSpectatorList(id, hud[], sendTo[])
+GetSpectatorList(id, hud[], len, sendTo[])
 {
 	new szName[33];
 	new bool:send = false;
@@ -3538,7 +3607,7 @@ GetSpectatorList(id, hud[], sendTo[])
 				{
 					get_user_name(dead, szName, charsmax(szName));
 					add(szName, charsmax(szName), "\n");
-					add(hud, charsmax(hud), szName);
+					add(hud, len, szName);
 					send = true;
 				}
 				sendTo[dead] = true;
@@ -5651,23 +5720,9 @@ UpdateRecords(id, Float:kztime, RUN_TYPE:topType)
 	if (rank == 1)
 	{
 		new ret;
-		ExecuteForward(mfwd_hlkz_worldrecord, ret, id, kztime, topType, arr);
+		ExecuteForward(mfwd_hlkz_worldrecord, ret, topType, arr);
 
-		// console_print(0, "prevButtonOrigin[0]: %d", floatround(prevButtonOrigin[0]));
-		// console_print(0, "prevButtonOrigin[1]: %d", floatround(prevButtonOrigin[1]));
-		// console_print(0, "prevButtonOrigin[2]: %d", floatround(prevButtonOrigin[2]));
-
-		message_begin(MSG_BROADCAST,SVC_TEMPENTITY); //create firework entity
-		write_byte(TE_EXPLOSION);
-		write_coord(floatround(prevButtonOrigin[0])     );	// start position
-		write_coord(floatround(prevButtonOrigin[1])     );
-		write_coord(floatround(prevButtonOrigin[2]) + 100);
-		write_short(g_Firework);	// sprite index
-		write_byte(20); // scale
-		write_byte(10);	// framerate
-		write_byte(6);
-		message_end();
-		emit_sound(id, CHAN_AUTO, g_strSoundFirework, VOL_NORM, ATTN_NONE, 0, PITCH_NORM);
+		LaunchRecordFireworks();
 	}
 
 	if (g_RecordRun[id])
@@ -5860,7 +5915,7 @@ SaveRecordedRun(id, RUN_TYPE:topType)
 	g_RecordRun[id] = fopen(replayFile, "wb");
 	//console_print(id, "opened replay file");
 
-	//fwrite(g_RecordRun[id], BUILD, BLOCK_SHORT); // version
+	//fwrite(g_RecordRun[id], DEMO_VERSION, BLOCK_SHORT); // version
 
 	new frameState[REPLAY];
 	for (new i; i < ArraySize(g_RunFrames[id]); i++)
@@ -5932,12 +5987,27 @@ PunishPlayerCheatingWithWeapons(id)
 		clr_bit(g_baIsPureRunning, id); // downgrade run from pure to pro
 }
 
+LaunchRecordFireworks()
+{
+	message_begin(MSG_BROADCAST, SVC_TEMPENTITY); // create firework entity
+	write_byte(TE_EXPLOSION);
+	write_coord(floatround(g_PrevButtonOrigin[0]));	// start position
+	write_coord(floatround(g_PrevButtonOrigin[1]));
+	write_coord(floatround(g_PrevButtonOrigin[2]) + 100);
+	write_short(g_Firework);	// sprite index
+	write_byte(20); // scale
+	write_byte(10);	// framerate
+	write_byte(6);
+	message_end();
+	emit_sound(0, CHAN_AUTO, FIREWORK_SOUND, VOL_NORM, ATTN_NONE, 0, PITCH_NORM);
+}
+
 /**
  * Returns the numbers in the version, so 0.34 returns 34, or 1.0.2 returns 102.
  * This is to save as metadata in the replay files so we can know what version they're
  * to make proper changes to them (e.g.: convert from one version to another 'cos
  * replay data format is changed).
- * // Now using the BUILD number instead
+ * // Now using the DEMO_VERSION number instead
  */
  /*
 GetVersionNumber()
@@ -6032,7 +6102,7 @@ public SelectRunnerId(failstate, error[], errNo, data[], size, Float:queuetime)
         log_to_file(MYSQL_LOG_FILENAME, "ERROR @ SelectRunnerId(): [%d] - [%s] - [%s]", errNo, error, data);
         return;
     }
-    new RUN_TYPE:topType = data[0];
+    //new RUN_TYPE:topType = data[0];
     new stats[STATS];
     //add(stats, sizeof(stats), data[STATS]);
     //console_print(0, "sizeof(data) = %d", size);
@@ -6078,7 +6148,7 @@ public InsertRunPlayerName(failstate, error[], errNo, data[], size, Float:queuet
         log_to_file(MYSQL_LOG_FILENAME, "ERROR @ InsertRunPlayerName(): [%d] - [%s] - [%s]", errNo, error, data);
         return;
     }
-    new RUN_TYPE:topType = data[0];
+    //new RUN_TYPE:topType = data[0];
     //console_print(0, "topType: %d", topType);
     new stats[STATS];
     //copy(stats, sizeof(stats), data[1]);
