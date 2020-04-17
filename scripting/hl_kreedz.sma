@@ -291,6 +291,7 @@ new Float:g_Speedcap[MAX_PLAYERS + 1];
 new g_ShowSpeed[MAX_PLAYERS + 1];
 new g_ShowSpecList[MAX_PLAYERS + 1];
 new Float:g_PlayerTASed[MAX_PLAYERS + 1];
+new g_InNoclip[MAX_PLAYERS + 1];
 
 new g_BotOwner[MAX_PLAYERS + 1];
 new g_BotEntity[MAX_PLAYERS + 1];
@@ -438,6 +439,7 @@ new pcvar_kz_mysql_db;
 new pcvar_kz_cup_max_maps;
 new pcvar_kz_cup_map_change_delay;
 new pcvar_kz_stop_moving_platforms;
+new pcvar_kz_noclip;
 
 new Handle:g_DbHost;
 new Handle:g_DbConnection;
@@ -539,6 +541,8 @@ public plugin_init()
 	pcvar_kz_cup_map_change_delay = register_cvar("kz_cup_map_change_delay", "8.0");
 
 	pcvar_kz_stop_moving_platforms = register_cvar("kz_stop_moving_platforms", "0");
+
+	pcvar_kz_noclip = register_cvar("kz_noclip", "0") // Allow or disallow the toggling of noclip 
 
 	register_dictionary("telemenu.txt");
 	register_dictionary("common.txt");
@@ -1452,6 +1456,7 @@ public client_putinserver(id)
 	g_ShowSpecList[id] = true;
 	g_ConsolePrintNextFrames[id] = 0;
 	g_ReplayFpsMultiplier[id] = 1;
+	g_InNoclip[id] = false;
 
 	//query_client_cvar(id, "kz_nightvision", "ClCmdNightvision"); // TODO save user variables in a file and retrieve them when they connect to server
 
@@ -1733,6 +1738,63 @@ CmdTimer(id)
 		ShowMessage(id, "Timer display: off");
 	}
 }
+
+CmdNoclip(id)
+{
+
+	if (!get_pcvar_num(pcvar_kz_noclip))
+	{
+		ShowMessage(id, "Noclip is disabled by server");
+		return;
+	}
+
+	if(IsPlayerStuck(id))
+	{
+		ShowMessage(id, "Cannot disable noclip in an object or out of bounds")
+		return;
+	}
+	
+	if (get_bit(g_baIsClimbing, id))
+		ResetPlayer(id, false, true); // Reset timer to prevent cheating
+
+	if (!g_InNoclip[id])
+	{
+		ShowMessage(id, "Noclip enabled");
+		set_pev(id, pev_movetype, MOVETYPE_NOCLIP); 
+	}
+	else
+	{
+		ShowMessage(id, "Noclip disabled");
+		set_pev(id, pev_movetype, MOVETYPE_WALK);
+	}
+
+	g_InNoclip[id] = !g_InNoclip[id]
+}
+
+
+bool:IsPlayerStuck(id) // Returns true if a player is outside the map or stuck in an object (after noclipping)
+{ // This is needed because a player could get stuck in a wall/oob and press a button from there.
+	new Float:origin[3];
+	pev(id, pev_origin, origin);
+	
+	for (new i = 1; i <= 16; i++) // Check within 16 units. 
+	{
+		for (new j = 1; j <= 16; j++)
+		{
+			for (new k = 1; k <= 36; k++)
+			{
+				new Float:tempOrigin[3], Float:tempOriginNeg[3]; 
+				xs_vec_set(tempOrigin, 		origin[0] + i, origin[1] + j, origin[2] + k);
+				xs_vec_set(tempOriginNeg, 	origin[0] - i, origin[1] - j, origin[2] - k);
+
+				if (engfunc(EngFunc_PointContents, tempOrigin) == CONTENTS_SOLID || engfunc(EngFunc_PointContents, tempOriginNeg) == CONTENTS_SOLID)
+					return true;
+			}
+		}
+	}
+	return false;
+}
+
 /*
 CmdReplaySmoothen(id)
 {
@@ -2526,6 +2588,9 @@ public CmdSayHandler(id, level, cid)
 
 	else if (containi(args[1], "top") == 0)
 		DisplayKzMenu(id, 5);
+
+	else if (containi(args[1], "noclip") == 0)
+		CmdNoclip(id);
 /*
 	else if (containi(args[1], "pov") == 0)
 	{
@@ -3056,7 +3121,7 @@ bool:CanReset(id, bool:showMessages = true)
 
 StartClimb(id)
 {
-	if (g_CheatCommandsGuard[id])
+	if (g_CheatCommandsGuard[id] || g_InNoclip[id]) // Cannot start timer while noclipping / using hook
 	{
 		if(get_pcvar_num(pcvar_kz_denied_sound))
 		{
