@@ -1783,11 +1783,30 @@ bool:IsPlayerStuck(id) // Returns true if a player is outside the map or stuck i
 		{
 			for (new k = 1; k <= 36; k++)
 			{
-				new Float:tempOrigin[3], Float:tempOriginNeg[3]; 
-				xs_vec_set(tempOrigin, 		origin[0] + i, origin[1] + j, origin[2] + k);
-				xs_vec_set(tempOriginNeg, 	origin[0] - i, origin[1] - j, origin[2] - k);
+				new Float:tempOrigin1[3], Float:tempOrigin2[3], Float:tempOrigin3[3], Float:tempOrigin4[3], 
+					Float:tempOrigin5[3], Float:tempOrigin6[3], Float:tempOrigin7[3], Float:tempOrigin8[3];
 
-				if (engfunc(EngFunc_PointContents, tempOrigin) == CONTENTS_SOLID || engfunc(EngFunc_PointContents, tempOriginNeg) == CONTENTS_SOLID)
+				xs_vec_set(tempOrigin1, origin[0] + i, origin[1] + j, origin[2] + k);
+				xs_vec_set(tempOrigin2, origin[0] + i, origin[1] + j, origin[2] - k);
+				xs_vec_set(tempOrigin3, origin[0] + i, origin[1] - j, origin[2] + k);
+				xs_vec_set(tempOrigin4, origin[0] + i, origin[1] - j, origin[2] - k);
+				xs_vec_set(tempOrigin5, origin[0] - i, origin[1] + j, origin[2] + k);
+				xs_vec_set(tempOrigin6, origin[0] - i, origin[1] + j, origin[2] - k);
+				xs_vec_set(tempOrigin7, origin[0] - i, origin[1] - j, origin[2] + k);
+				xs_vec_set(tempOrigin8, origin[0] - i, origin[1] - j, origin[2] - k);
+
+				if (engfunc(EngFunc_PointContents, tempOrigin1) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin2) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin3) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin4) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin5) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin6) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin7) == CONTENTS_SOLID
+					|| engfunc(EngFunc_PointContents, tempOrigin8) == CONTENTS_SOLID
+					|| engfunc(EngFunc_FindEntityInSphere, 1, origin, 36) != 0 
+					// detect entities. not a solution because weapons count as entities, lights, etc. which would prevent.
+					// what I really need is a function to find brush entities. 
+					)
 					return true;
 			}
 		}
