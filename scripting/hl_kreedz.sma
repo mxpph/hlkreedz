@@ -342,6 +342,7 @@ new Float:g_Speedcap[MAX_PLAYERS + 1];
 new g_ShowSpeed[MAX_PLAYERS + 1];
 new g_ShowDistance[MAX_PLAYERS + 1];
 new g_ShowSpecList[MAX_PLAYERS + 1];
+new g_SpecList[MAX_PLAYERS + 1][MAX_PLAYERS + 1];
 new bool:g_TpOnCountdown[MAX_PLAYERS + 1]; // Teleport to start position when agstart or NR countdown starts?
 
 new g_BotOwner[MAX_PLAYERS + 1];
@@ -2123,6 +2124,10 @@ CmdSpecList(id)
 		return;
 	}
 	g_ShowSpecList[id] = !g_ShowSpecList[id];
+
+	if (!g_ShowSpecList[id])
+		ClearSyncHud(id, g_SyncHudSpecList);
+
 	client_print(id, print_chat, "[%s] Spectator list is now %s", PLUGIN_TAG, g_ShowSpecList[id] ? "visible" : "hidden");
 }
 
@@ -3638,9 +3643,6 @@ ClientCommandSpectatePost(id)
 	}
 	else if (bNotInSpec)
 	{
-		ClearSyncHud(id, g_SyncHudSpecList);
-		ClearSyncHud(pev(id, pev_iuser2), g_SyncHudSpecList);
-
 		// Returned from spectator mode, resume timer
 		ResumeTimer(id);
 	}
@@ -4303,24 +4305,54 @@ UpdateHud(Float:currGameTime)
 			ClearSyncHud(targetId, g_SyncHudSpecList);
 		}
 
-		// Drawing spectator list
-		if (is_user_alive(id) && get_pcvar_num(pcvar_kz_speclist))
+		if (get_pcvar_num(pcvar_kz_speclist) && g_ShowSpecList[id] == true)
 		{
-			new bool:sendTo[33];
-			if (GetSpectatorList(id, specHud, charsmax(specHud), sendTo))
+			new bool:hasSpecList = false;
+			new szName[33];
+			GetColorlessName(targetId, szName, charsmax(szName));
+			format(specHud, 45, "Spectating %s:\n", szName);
+
+			for (new i = 1; i <= g_MaxPlayers; i++)
 			{
-				for (new i = 1; i <= g_MaxPlayers; i++)
+				if (g_SpecList[id][i] == true)
 				{
-					if (sendTo[i] == true && g_ShowSpecList[i] == true)
-					{
-						set_hudmessage(g_HudRGB[i][0], g_HudRGB[i][1], g_HudRGB[i][2], 0.75, 0.15, 0, 0.0, 999999.0, 0.0, 0.0, -1);
-						ShowSyncHudMsg(i, g_SyncHudSpecList, specHud);
-					} else {
-						ClearSyncHud(i, g_SyncHudSpecList);
-					}
+					new spectatorName[35];
+					hasSpecList = true;
+
+					GetColorlessName(i, spectatorName, charsmax(spectatorName));
+					add(spectatorName, charsmax(spectatorName), "\n");
+					add(specHud, charsmax(specHud), spectatorName);
 				}
 			}
+
+			if(hasSpecList)
+			{
+				set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.75, 0.15, 0, 0.0, 999999.0, 0.0, 0.0, -1);
+				ShowSyncHudMsg(id, g_SyncHudSpecList, specHud);
+			}
 		}
+
+		// Drawing spectator list
+		// if (is_user_alive(id) && get_pcvar_num(pcvar_kz_speclist))
+		// {
+		// 	new bool:sendTo[MAX_PLAYERS + 1];
+		// 	new specCount;
+		// 	specCount = GetSpectatorList(id, specHud, charsmax(specHud), sendTo);
+		// 	if (specCount > 0)
+		// 	{
+		// 		for (new i = 1; i <= g_MaxPlayers; i++)
+		// 		{
+		// 			if (sendTo[i] == true && g_ShowSpecList[i] == true)
+		// 			{
+		// 				set_hudmessage(g_HudRGB[i][0], g_HudRGB[i][1], g_HudRGB[i][2], 0.75, 0.15, 0, 0.0, 999999.0, 0.0, 0.0, -1);
+		// 				ShowSyncHudMsg(i, g_SyncHudSpecList, specHud);
+
+		// 			} else if (specCount == 1) {
+		// 				ClearSyncHud(i, g_SyncHudSpecList);
+		// 			}
+		// 		}
+		// 	}
+		// }
 
 		// Drawing pressed keys
 		HudShowPressedKeys(id, mode, targetId);
@@ -4579,7 +4611,7 @@ StopCountdown(id)
 GetSpectatorList(id, hud[], len, sendTo[])
 {
 	new szName[33];
-	new bool:send = false;
+	new send;
 
 	sendTo[id] = true;
 
@@ -4600,7 +4632,7 @@ GetSpectatorList(id, hud[], len, sendTo[])
 					GetColorlessName(dead, szName, charsmax(szName));
 					add(szName, charsmax(szName), "\n");
 					add(hud, len, szName);
-					send = true;
+					send++;
 				}
 				sendTo[dead] = true;
 			}
@@ -5390,6 +5422,32 @@ public Fw_FmPlayerPostThinkPre(id)
 	{
 		if (IsConnected(i) && g_SolidState[i] >= 0)
 			set_pev(i, pev_solid, g_SolidState[i]);
+	}
+
+	new specTarget = pev(id, pev_iuser2);
+	if (!specTarget)
+		specTarget = id;
+
+	// Used for spectator list. Store player ids in g_SpecList.
+	for (new dead = 1; dead <= g_MaxPlayers; dead++)
+	{
+		if (is_user_connected(dead))
+		{
+			if (is_user_alive(dead))
+				continue;
+
+			if (pev(dead, pev_iuser2) == specTarget)
+			{
+				if(!(get_pcvar_num(pcvar_kz_speclist_admin_invis) && get_user_flags(dead, 0) & ADMIN_IMMUNITY))
+				{
+					g_SpecList[id][dead] = true;
+				} else {
+					g_SpecList[id][dead] = false;
+				}
+			} else {
+				g_SpecList[id][dead] = false;
+			}
+		}
 	}
 
 	//pev(id, pev_velocity, g_Velocity[id]);
